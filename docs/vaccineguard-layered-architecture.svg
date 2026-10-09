@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">VaccineGuard high-level layered architecture</title>
+  <desc id="desc">A slide-ready architecture diagram showing role dashboards, backend services, IoT sensor ingestion, and Supabase storage and identity.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset="1" stop-color="#f1f5f9"/></linearGradient>
+    <linearGradient id="mint" x1="0" x2="1"><stop stop-color="#2bd4a1"/><stop offset="1" stop-color="#53e6b9"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#8ea4bb"/></marker>
+    <marker id="arrowMint" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#43d9aa"/></marker>
+    <style>
+      text{font-family:Inter,Segoe UI,Arial,sans-serif;fill:#17283b}
+      .title{font-size:38px;font-weight:700;letter-spacing:.2px}.subtitle{font-size:17px;fill:#62758a}
+      .layer{fill:#ffffff;stroke:#d7e0e9;stroke-width:2}.layerHead{font-size:15px;font-weight:700;letter-spacing:2px;fill:#5b7086}
+      .label{font-size:19px;font-weight:650}.small{font-size:15px;fill:#62758a}.chip{fill:#f5f8fb;stroke:#d7e0e9;stroke-width:1.5}
+      .mint{fill:#44d5a8}.blue{fill:#62b5ff}.amber{fill:#ffba62}.violet{fill:#bba0ff}
+      .connector{fill:none;stroke:#8193a6;stroke-width:2.5;marker-end:url(#arrow)}
+      .connectorMint{fill:none;stroke:#43d9aa;stroke-width:2.5;marker-end:url(#arrowMint)}
+      .flow{font-size:13px;fill:#52677c;letter-spacing:.3px}
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1480" cy="72" r="145" fill="#dcecf0" opacity=".55"/>
+  <text x="100" y="76" class="title">VaccineGuard Architecture</text>
+  <text x="102" y="108" class="subtitle">High-level view · prototype data flow</text>
+  <rect x="1290" y="57" width="210" height="38" rx="19" fill="#e8f8f2" stroke="#9bdcc5"/>
+  <circle cx="1312" cy="76" r="5" fill="#27a77d"/><text x="1327" y="82" class="flow" fill="#19765a">COLD-CHAIN MONITORING</text>
+
+  <!-- Presentation layer -->
+  <rect x="100" y="145" width="1400" height="150" rx="20" class="layer"/>
+  <rect x="100" y="145" width="8" height="150" rx="4" fill="url(#mint)"/>
+  <text x="135" y="178" class="layerHead">01  PRESENTATION LAYER</text>
+  <text x="135" y="213" class="small">Role-based web dashboards</text>
+  <rect x="500" y="174" width="270" height="84" rx="14" class="chip"/>
+  <circle cx="532" cy="216" r="8" class="mint"/><text x="554" y="211" class="label">Shipment user</text><text x="554" y="237" class="small">Assigned shipment tracking</text>
+  <rect x="800" y="174" width="270" height="84" rx="14" class="chip"/>
+  <circle cx="832" cy="216" r="8" class="blue"/><text x="854" y="211" class="label">Administrator</text><text x="854" y="237" class="small">Network overview</text>
+  <rect x="1100" y="174" width="340" height="84" rx="14" class="chip"/>
+  <circle cx="1132" cy="216" r="8" class="amber"/><text x="1154" y="211" class="label">Checkpoint operator</text><text x="1154" y="237" class="small">Assigned alerts and response</text>
+
+  <!-- Experience to application -->
+  <path d="M940 295V340" class="connectorMint"/>
+  <text x="958" y="324" class="flow">HTTPS · WebSocket</text>
+
+  <!-- Integration and application layer -->
+  <rect x="100" y="350" width="650" height="200" rx="20" class="layer"/>
+  <rect x="100" y="350" width="8" height="200" rx="4" fill="#62b5ff"/>
+  <text x="135" y="384" class="layerHead">02  IoT &amp; MESSAGING</text>
+  <rect x="135" y="410" width="165" height="83" rx="13" class="chip"/>
+  <text x="158" y="444" class="label">ESP32</text><text x="158" y="471" class="small">Temp · humidity · GPS</text>
+  <path d="M300 452H342" class="connector"/>
+  <rect x="350" y="410" width="145" height="83" rx="13" class="chip"/>
+  <text x="378" y="444" class="label">MQTT</text><text x="378" y="471" class="small">Message broker</text>
+  <path d="M495 452H537" class="connector"/>
+  <rect x="545" y="410" width="170" height="83" rx="13" class="chip"/>
+  <text x="565" y="444" class="label">Python worker</text><text x="565" y="471" class="small">Reads sensor events</text>
+
+  <rect x="850" y="350" width="650" height="200" rx="20" class="layer"/>
+  <rect x="850" y="350" width="8" height="200" rx="4" fill="#ffba62"/>
+  <text x="885" y="384" class="layerHead">03  APPLICATION LAYER</text>
+  <rect x="885" y="410" width="170" height="83" rx="13" class="chip"/>
+  <text x="909" y="444" class="label">FastAPI</text><text x="909" y="471" class="small">Backend services</text>
+  <rect x="1070" y="410" width="195" height="83" rx="13" class="chip"/>
+  <text x="1091" y="444" class="label">Excursion analysis</text><text x="1091" y="471" class="small">Viability estimate</text>
+  <rect x="1280" y="410" width="185" height="83" rx="13" class="chip"/>
+  <text x="1302" y="444" class="label">Alerts &amp; updates</text><text x="1302" y="471" class="small">Dashboard events</text>
+  <path d="M750 452H840" class="connectorMint"/>
+  <text x="761" y="435" class="flow">sensor readings</text>
+  <path d="M1055 493H1070" class="connector"/>
+  <path d="M1265 493H1280" class="connector"/>
+
+  <!-- Application to data -->
+  <path d="M1175 550V615" class="connectorMint"/>
+  <text x="1190" y="590" class="flow">read · write · role lookup</text>
+
+  <!-- Data and identity layer -->
+  <rect x="100" y="625" width="1400" height="145" rx="20" class="layer"/>
+  <rect x="100" y="625" width="8" height="145" rx="4" fill="#bba0ff"/>
+  <text x="135" y="660" class="layerHead">04  DATA &amp; IDENTITY LAYER</text>
+  <rect x="510" y="650" width="400" height="82" rx="14" class="chip"/>
+  <circle cx="541" cy="691" r="7" class="violet"/><text x="562" y="686" class="label">Supabase Auth</text><text x="562" y="712" class="small">Sessions · profiles · role checks · RLS</text>
+  <rect x="940" y="650" width="500" height="82" rx="14" class="chip"/>
+  <circle cx="971" cy="691" r="7" class="blue"/><text x="992" y="686" class="label">Application data</text><text x="992" y="712" class="small">Shipments · sensor readings · alert records</text>
+
+  <path d="M1440 216H1540V610H710V642" fill="none" stroke="#bba0ff" stroke-width="2" stroke-dasharray="7 7" marker-end="url(#arrow)" opacity=".9"/>
+  <rect x="1012" y="590" width="330" height="35" rx="17" fill="#f3effb" stroke="#c8b9e5"/>
+  <text x="1035" y="613" class="flow">Dashboard sign-in uses Supabase Auth</text>
+  <text x="100" y="858" class="flow">Demo readings and shipment locations are illustrative, not live measurements.</text>
+</svg>

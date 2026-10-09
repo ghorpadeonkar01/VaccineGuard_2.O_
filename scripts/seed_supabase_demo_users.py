@@ -1,4 +1,4 @@
-"""Provision the three local VaccineGuard demo accounts.
+"""Provision the four local VaccineGuard demo accounts.
 
 Run from a trusted terminal after applying the SQL migration. Uses a Supabase
 secret/service_role key only for Auth Admin and profile upsert operations.
@@ -18,8 +18,9 @@ import urllib.request
 
 ACCOUNTS = (
     ("admin@vaccineguard.demo", "VaccineGuard Administrator", "admin"),
-    ("user@vaccineguard.demo", "VaccineGuard Shipment User", "user"),
-    ("checkpoint@vaccineguard.demo", "VaccineGuard Checkpoint Operator", "checkpoint"),
+    ("user@vaccineguard.demo", "VaccineGuard Sender Receiver", "sender_receiver"),
+    ("driver@vaccineguard.demo", "VaccineGuard Transporter", "transporter"),
+    ("checkpoint@vaccineguard.demo", "VaccineGuard Checkpoint Manager", "checkpoint"),
 )
 WORDS = (
     "apple", "autumn", "beach", "bird", "blue", "brave", "breeze", "bright",

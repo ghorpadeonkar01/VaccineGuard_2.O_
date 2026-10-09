@@ -20,11 +20,11 @@ window.VG_CONFIG = Object.freeze({
 });
 ```
 
-`API_BASE_URL` must be an origin/base path reachable from the browser. Configure FastAPI CORS for the frontend origin and use HTTPS outside local development. Supabase browser sign-in uses `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` from `assets/js/config.js`, with `@supabase/supabase-js` v2 loaded from the official CDN. The login calls `signInWithPassword`, stores the session through Supabase's client, supports password reset, and reads the authenticated user's role from `public.profiles`. Row level security permits each account to read only its own profile, and there are no browser-side role write policies. Assign roles only through the trusted provisioning script. Never put a database password or Supabase secret/service-role key in browser files. The local redirect URL (for example, `http://127.0.0.1:8080/login.html`) must be allowed in Supabase Auth URL Configuration for password recovery.
+`API_BASE_URL` must be an origin/base path reachable from the browser. Configure FastAPI CORS for the frontend origin and use HTTPS outside local development. Supabase browser sign-in uses `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` from `assets/js/config.js`, with `@supabase/supabase-js` v2 loaded from the official CDN. The login calls `signInWithPassword`, stores the session through Supabase's client, supports password reset, and reads the authenticated user's role from `public.profiles`. Profiles are read-only to signed-in users; account creation and deletion run through the admin-only `admin-users` Edge Function. Shipment and alert access is enforced by the operations migration policies. Never put a database password or Supabase secret/service-role key in browser files. The local redirect URL (for example, `http://127.0.0.1:8080/login.html`) must be allowed in Supabase Auth URL Configuration for password recovery.
 
-Apply `../supabase/migrations/202610090001_profiles.sql` in the Supabase SQL Editor first. Then run `python scripts/seed_supabase_demo_users.py` from the project root. The seeder creates exactly `admin@vaccineguard.demo`, `user@vaccineguard.demo`, and `checkpoint@vaccineguard.demo`, writes their roles to `public.profiles`, and generates memorable, random six-word passphrases and prints them to the terminal. On reruns it resets passwords only for these three named demo accounts, never duplicates users, and upserts their profile roles. Save the passwords from each run; they are not stored by the app. The script prompts for the Supabase secret/service_role key with hidden input. Do not put that key in frontend files or commit it. `.env.example` documents the trusted terminal variables; the script does not automatically load `.env`.
+Apply `../supabase/migrations/202610090001_profiles.sql` and `../supabase/migrations/202610090002_roles_and_operations.sql` in that order in the Supabase SQL Editor. Then run `python scripts/seed_supabase_demo_users.py` from the project root. The seeder creates exactly `admin@vaccineguard.demo`, `user@vaccineguard.demo`, `driver@vaccineguard.demo`, and `checkpoint@vaccineguard.demo`, writes their roles to `public.profiles`, and generates memorable, random six-word passphrases and prints them to the terminal. On reruns it resets passwords only for these four named demo accounts, never duplicates users, and upserts their profile roles. Save the passwords from each run; they are not stored by the app. The script prompts for the Supabase secret/service_role key with hidden input. Do not put that key in frontend files or commit it. `.env.example` documents the trusted terminal variables; the script does not automatically load `.env`.
 
-By default, `API_BASE_URL` is empty and the site stays in clearly labeled demo mode. Demo fixtures live in `assets/js/demo-data.js` and are fictional; they are never merged with API records. Demo mutation controls are disabled or explain that persistence is unavailable. Do not use demo values as operational vaccine measurements.
+By default, `API_BASE_URL` is empty. Role dashboards and shipment management connect directly to Supabase; analytics and other unimplemented pages continue to use clearly labeled fixtures. Demo fixtures live in `assets/js/demo-data.js` and are fictional; they are never merged with API records. Demo mutation controls are disabled or explain that persistence is unavailable. Do not use demo values as operational vaccine measurements.
 
 ## Pages
 
@@ -53,8 +53,8 @@ Use consistent JSON error bodies and explicit units/timestamps, pagination, role
 - Responsive sidebar navigation, search and filter controls for fixture lists, shipment detail routing, map filters and marker selection, print CSS, and a demo CSV download.
 - Native SVG demo trend charts. The illustrative chart is visibly marked as demo and is not returned as real measurement data.
 - Supabase email/password sign-in, password reset, password visibility toggle, validation, and Supabase session-backed API bearer tokens. Role UI reads the protected `public.profiles` row; route checks are only a frontend safeguard, so every data API must enforce authorization too.
-- Shipment creation/edit, alert acknowledgment, checkpoint workflow, policy/user changes, and simulation calls are unavailable without endpoint specifications. Diagnostic/audit data is not fabricated.
-- Dashboard currently displays separate fictional fixtures only. It does not claim connection to a backend, live updates, or successful persistence.
+- The role dashboards use Supabase records: administrators manage users and shipments; senders create orders and monitor readings; receivers confirm delivery; transporters see assigned routes and alerts; checkpoint managers acknowledge and resolve damage alerts. Realtime updates require the Supabase tables to be enabled in the Realtime publication.
+- Analytics, policy management, simulation, and audit pages remain demo or unavailable views until their data contracts are implemented.
 
 ## Manual verification checklist
 
@@ -68,3 +68,17 @@ Use consistent JSON error bodies and explicit units/timestamps, pagination, role
 - [ ] Test tablet/mobile widths and keyboard-only navigation against the target browsers.
 
 No browser/device integration test has been run in this workspace.
+
+## Role-based operations rollout
+
+Apply `supabase/migrations/202610090002_roles_and_operations.sql` after the profiles migration. It converts existing `user` profiles to `sender_receiver`, adds ownership and assignment links to shipments, and sets role-based RLS for shipments and alerts. Existing shipment rows without owner IDs remain admin-visible until assigned.
+
+Deploy the trusted Auth administrator function from the repository root with the Supabase CLI after linking the project:
+
+```powershell
+supabase functions deploy admin-users
+```
+
+The function uses the Supabase project environment and service-role secret on the Edge Function runtime; never copy that secret into frontend files. Administrators can create sender/receiver, transporter, and checkpoint accounts, and delete accounts. Checkpoint accounts should be assigned a checkpoint.
+
+Restart `backend/mqtt_worker.py` after applying the migration so newly generated damage alerts inherit each shipment's checkpoint assignment. The sender/receiver dashboard creates shipments and assigns a receiver, optional transporter, and optional checkpoint. Receivers mark delivery; checkpoint managers acknowledge or resolve assigned alerts; assigned drivers see shipment maps and alerts.

@@ -1,0 +1,4 @@
+[functions.admin-users]
+# Let browser OPTIONS preflight reach the function's CORS handler.
+# The function validates the bearer token and admin role itself.
+verify_jwt = false

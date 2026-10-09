@@ -1,4 +1,4 @@
-(()=>{
+﻿(()=>{
  let client;
  function getClient(){
   const cfg=window.VG_CONFIG||{};
@@ -7,7 +7,7 @@
   if(!client)client=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storageKey:'vaccineguard-auth'}});
   return client;
  }
- async function getRole(user){if(!user?.id)return null;const {data,error}=await getClient().from('profiles').select('role').eq('id',user.id).maybeSingle();if(error)throw error;return ['admin','user','checkpoint'].includes(data?.role)?data.role:null}
+ async function getRole(user){if(!user?.id)return null;const {data,error}=await getClient().from('profiles').select('role').eq('id',user.id).maybeSingle();if(error)throw error;return ['admin','sender_receiver','transporter','checkpoint'].includes(data?.role)?data.role:null}
  window.VGAuth={
   client:getClient,
   signIn:(email,password)=>getClient().auth.signInWithPassword({email,password}),

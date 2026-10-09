@@ -4,3 +4,21 @@
 @media(max-width:760px){.sidebar{transform:translateX(-100%);transition:transform .2s;width:270px;box-shadow:8px 0 30px #102f4f30}.sidebar.open{transform:translateX(0)}.main{margin:0}.hamburger{display:inline-grid;place-items:center;border:0;background:transparent;font-size:22px;color:var(--navy);margin-right:10px}.topbar{height:62px;padding:0 15px}.top-left{display:flex;align-items:center}.content{padding:18px 14px 30px}.demo-banner{padding:8px 14px}.stat-grid{grid-template-columns:repeat(2,1fr);gap:8px}.stat-value{font-size:21px}.grid-2,.grid-3,.grid-sidebar{grid-template-columns:1fr}.page-heading{align-items:center}.page-heading h1{font-size:20px}.top-actions .connection,.user-pill span:last-child{display:none}.login-page{grid-template-columns:1fr}.login-aside{display:none}.login-card{padding:50px 0}.card{padding:14px}.toolbar .input{flex:1;min-width:140px}}
 @media(max-width:390px){.stat-grid{grid-template-columns:1fr 1fr}.stat-card{padding:12px}.stat-value{font-size:19px}.page-heading .button{font-size:11px;padding:8px}.field-grid{grid-template-columns:1fr}.wide{grid-column:auto}}
 @media print{.sidebar,.topbar,.demo-banner,.toolbar,.button{display:none!important}.main{margin:0}.content{padding:0}.card{box-shadow:none;break-inside:avoid}}
+.form-section-title{grid-column:1/-1;margin:18px 0 0;padding-bottom:9px;border-bottom:1px solid var(--line);font:700 13px Manrope,sans-serif;color:var(--navy)}#vaccine-form .field-grid{gap:15px 18px}.field{font-size:12px;color:#304657}.field input,.field select,.field textarea{margin-top:1px;padding:11px 12px;border-color:#dce5e9;border-radius:8px;font-size:13px;transition:border-color .15s,box-shadow .15s}.field input:focus,.field textarea:focus{border-color:#168c83;box-shadow:0 0 0 3px #168c8318}.field textarea{resize:vertical}.required-mark{color:#bd4a4a}.form-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:9px;margin-top:20px;flex-wrap:wrap}.form-actions .muted{margin-right:auto}.db-value.is-null{color:#8896a0;font-style:italic}.db-value{font-variant-numeric:tabular-nums}#vaccine-form-slot .card{border:1px solid #dce9e7;box-shadow:0 8px 26px #193b500c}#vaccine-form-slot .card-head{margin-bottom:8px}
+/* Sidebar iconography and alignment */
+.sidebar{overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#2d485d transparent}
+.brand{width:100%;gap:11px;align-items:center;padding:2px 9px 24px;line-height:1.15}
+.brand-mark{flex:0 0 40px;width:40px;height:40px;border-radius:12px;background:linear-gradient(145deg,#238f80,#176b68);font:800 12px Manrope,sans-serif;letter-spacing:.5px;color:#d9fff4;box-shadow:inset 0 0 0 1px #ffffff20}
+.brand-copy{display:block;min-width:0;white-space:nowrap}
+.brand small{white-space:normal;max-width:155px;line-height:1.35;font-size:10px;letter-spacing:.2px}
+.nav-label{padding:14px 11px 9px;font-size:10px;line-height:1.2}
+.nav-links{gap:4px;min-height:0}
+.nav-link{min-height:44px;padding:8px 10px;gap:11px;line-height:1.25}
+.nav-icon{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;line-height:1;color:#91adbd}
+.nav-icon svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav-text{display:block;min-width:0;overflow-wrap:anywhere}
+.nav-link.active .nav-icon{color:#76deca}
+.nav-link:hover .nav-icon{color:#a8eadd}
+.sidebar-bottom{flex:0 0 auto;padding-top:10px}
+.connection:before{content:'';display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#39b98d;vertical-align:1px}
+@media(max-width:760px){.brand{padding-bottom:20px}.sidebar.open{overflow-y:auto}}
