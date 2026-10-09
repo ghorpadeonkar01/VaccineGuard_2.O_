@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+
+# Local environments and secrets
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# JavaScript dependencies and builds
+node_modules/
+dist/
+build/
+.next/
+coverage/
+
+# Python cache
+_pycache_/
+*.py[cod]
