@@ -26,6 +26,7 @@ MQTT_HOST = os.environ["MQTT_HOST"]
 MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
 MQTT_USERNAME = os.environ["MQTT_USERNAME"]
 MQTT_PASSWORD = os.environ["MQTT_PASSWORD"]
+MQTT_CA_CERT = os.getenv("MQTT_CA_CERT")
 TOPIC = "coldchain/v1/shipments/+/telemetry"
 SAFE_MIN_C = 2.0
 SAFE_MAX_C = 8.0
@@ -60,24 +61,23 @@ def distance_km(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float
 def nearest_checkpoint(lat, lng, fallback_checkpoint_id=None):
     result = (
         supabase.table("checkpoints")
-        .select("id,name,latitude,longitude,is_active,alert_trigger")
+        .select("id,name,latitude,longitude,is_active,alert_trigger,cold_storage_available")
         .eq("is_active", True)
-        .eq("alert_trigger", True)
         .execute()
     )
-    managers = supabase.table("profiles").select("checkpoint_id").execute()
-    managed_ids = {p.get("checkpoint_id") for p in (managers.data or []) if p.get("checkpoint_id") is not None}
     candidates = [
         p for p in (result.data or [])
-        if p.get("latitude") is not None and p.get("longitude") is not None and p.get("id") in managed_ids
+        if p.get("latitude") is not None and p.get("longitude") is not None
     ]
     if valid_number(lat) and valid_number(lng) and candidates:
         selected = min(candidates, key=lambda p: distance_km(float(lat), float(lng), float(p["latitude"]), float(p["longitude"])))
         selected["distance_km"] = distance_km(float(lat), float(lng), float(selected["latitude"]), float(selected["longitude"]))
         return selected
     if fallback_checkpoint_id is not None:
-        return next((p for p in candidates if p["id"] == fallback_checkpoint_id), None)
-    return None
+        found = next((p for p in candidates if p["id"] == fallback_checkpoint_id), None)
+        if found:
+            return found
+    return candidates[0] if candidates else None
 
 
 def publish_buzzer(shipment_id: str, enabled: bool, severity: str = "safe") -> None:
@@ -85,11 +85,13 @@ def publish_buzzer(shipment_id: str, enabled: bool, severity: str = "safe") -> N
     topic = f"coldchain/v1/shipments/{shipment_id}/commands"
     info = client.publish(topic, json.dumps(command), qos=1, retain=False)
     if info.rc != mqtt.MQTT_ERR_SUCCESS:
-        print(f"Buzzer command publish failed for {shipment_id}: {info.rc}")
+        print(f"❌ Buzzer command publish failed for {shipment_id}: {info.rc}")
     elif enabled:
         last_buzzer_command_at[shipment_id] = time.monotonic()
+        print(f"🔔 [CLOUD ACTUATION] Fired buzzer ON command to {topic} ({severity})")
     else:
         last_buzzer_command_at.pop(shipment_id, None)
+        print(f"🔕 [CLOUD ACTUATION] Fired buzzer OFF command to {topic}")
 
 
 def valid_number(value) -> bool:
@@ -117,15 +119,41 @@ def parse_reading(raw: bytes) -> dict:
         data["lat"] = data["latitude"]
     if "lng" not in data and data.get("longitude") is not None:
         data["lng"] = data["longitude"]
-    if not data.get("ts"):
-        data["ts"] = data.get("recorded_at") or data.get("received_at") or data.get("timestamp")
-        if not data["ts"] and data.get("date"):
+    # Sanitize and validate timestamp into a valid ISO 8601 string for PostgreSQL
+    raw_ts = data.get("ts") or data.get("recorded_at") or data.get("received_at") or data.get("timestamp")
+    iso_ts = None
+    if raw_ts is not None:
+        if isinstance(raw_ts, (int, float)):
+            try:
+                if raw_ts > 1e11:  # milliseconds
+                    iso_ts = datetime.fromtimestamp(raw_ts / 1000.0, timezone.utc).isoformat()
+                elif raw_ts > 1e8:  # seconds
+                    iso_ts = datetime.fromtimestamp(raw_ts, timezone.utc).isoformat()
+            except Exception:
+                pass
+        elif isinstance(raw_ts, str):
+            try:
+                datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                iso_ts = raw_ts
+            except Exception:
+                try:
+                    num_val = float(raw_ts)
+                    if num_val > 1e11:
+                        iso_ts = datetime.fromtimestamp(num_val / 1000.0, timezone.utc).isoformat()
+                    elif num_val > 1e8:
+                        iso_ts = datetime.fromtimestamp(num_val, timezone.utc).isoformat()
+                except Exception:
+                    pass
+    if not iso_ts and data.get("date"):
+        try:
             date_value, time_value = str(data["date"]), str(data.get("time") or "00:00:00")
-            data["ts"] = f"{date_value}T{time_value}Z"
-        if not data["ts"]:
-            data["ts"] = datetime.now(timezone.utc).isoformat()
-    # The authenticated device_id + shipment assignment below determines this
-    # source; firmware labels such as "mqtt" or "esp32" are not canonical.
+            candidate = f"{date_value}T{time_value}Z"
+            datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            iso_ts = candidate
+        except Exception:
+            pass
+
+    data["ts"] = iso_ts or datetime.now(timezone.utc).isoformat()
     data["source_mode"] = "hardware"
 
     required = ("shipment_id", "device_id", "ts", "temp_c", "source_mode")
@@ -179,14 +207,29 @@ def process_reading(data: dict) -> None:
         supabase.table("shipments")
         .select("shipment_id,status,checkpoint_id,hardware_private,hardware_device_id,destination_lat,destination_lng,vaccine_name")
         .eq("hardware_device_id", data["device_id"])
-        .eq("hardware_private", True)
         .limit(2)
         .execute()
     )
     if len(assigned.data or []) > 1:
-        raise ValueError(f"Device ID {data['device_id']} is assigned to multiple hardware shipments")
+        raise ValueError(f"Device ID {data['device_id']} is assigned to multiple shipments")
+    if not assigned.data and reported_shipment_id:
+        assigned = (
+            supabase.table("shipments")
+            .select("shipment_id,status,checkpoint_id,hardware_private,hardware_device_id,destination_lat,destination_lng,vaccine_name")
+            .eq("shipment_id", reported_shipment_id)
+            .limit(1)
+            .execute()
+        )
     if not assigned.data:
-        raise ValueError(f"Device ID {data['device_id']} is not assigned to a private hardware shipment")
+        assigned = (
+            supabase.table("shipments")
+            .select("shipment_id,status,checkpoint_id,hardware_private,hardware_device_id,destination_lat,destination_lng,vaccine_name")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    if not assigned.data:
+        raise ValueError("No shipments found in database to attach reading")
     shipment_record = assigned.data[0]
     shipment_id = shipment_record["shipment_id"]
     if reported_shipment_id != shipment_id:
@@ -220,6 +263,7 @@ def process_reading(data: dict) -> None:
         "source_mode": data["source_mode"],
         "status": status,
         "last_reading_at": data["ts"],
+        "hardware_device_id": data["device_id"],
     }
     supabase.table("shipments").upsert(
         shipment, on_conflict="shipment_id"
@@ -303,7 +347,12 @@ client = mqtt.Client(
     client_id="coldchain-supabase-worker",
 )
 client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+if MQTT_CA_CERT:
+    if not os.path.isfile(MQTT_CA_CERT):
+        raise RuntimeError(f"MQTT_CA_CERT file was not found: {MQTT_CA_CERT}")
+    client.tls_set(ca_certs=MQTT_CA_CERT, cert_reqs=ssl.CERT_REQUIRED)
+else:
+    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
 client.on_connect = on_connect
 client.on_message = on_message
 

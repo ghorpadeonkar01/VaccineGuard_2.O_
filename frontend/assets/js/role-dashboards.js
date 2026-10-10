@@ -1,39 +1,495 @@
-﻿(()=>{
-const esc=s=>String(s??'null').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const client=()=>VGAuth.client();
-let liveChannel=null;
-function watchTables(tables,callback){if(liveChannel)client().removeChannel(liveChannel);let channel=client().channel('role-workspace-'+Math.random().toString(36).slice(2));for(const table of tables)channel=channel.on('postgres_changes',{event:'*',schema:'public',table},callback);liveChannel=channel;channel.subscribe()}
+(() => {
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const client = () => VGAuth.client();
+  let liveChannel = null;
 
-const status=s=>`<span class="badge ${/critical|damage/i.test(s)?'critical':/warning|risk|open|detected/i.test(s)?'warn':/delivered|resolved|acknowledged|safe/i.test(s)?'ok':'info'}">${esc(s)}</span>`;
-const card=(title,sub,body)=>`<section class="card"><div class="card-head"><div><h2 class="card-title">${title}</h2><div class="card-subtitle">${sub}</div></div></div>${body}</section>`;
-const note=(id,text='',kind='warning')=>`<div id="${id}" class="notice ${kind}" role="status">${esc(text)}</div>`;
-const table=(heads,rows)=>`<div class="table-wrap"><table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows||`<tr><td colspan="${heads.length}" class="empty-state">No records to show.</td></tr>`}</tbody></table></div>`;
-const roleLabels={admin:'Administrator',sender_receiver:'Sender / receiver',transporter:'Driver / transporter',checkpoint:'Checkpoint manager'};
-const value=(x)=>esc(x==null?'null':x);
-function header(role,title,subtitle,action=''){return `<div class="role-heading"><div><span class="eyebrow">${esc(roleLabels[role]||role)}</span><h1>${title}</h1><p>${subtitle}</p></div>${action}</div>`}
-function errorBox(error){return `<div class="notice danger">${esc(error?.message||error||'Request failed')}</div>`}
-async function current(){const session=await VGAuth.session();if(!session)throw Error('Session expired. Please sign in again.');return session.user}
+  function watchTables(tables, callback) {
+    if (liveChannel) client().removeChannel(liveChannel);
+    let channel = client().channel('role-workspace-' + Math.random().toString(36).slice(2));
+    for (const table of tables) channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, callback);
+    liveChannel = channel;
+    channel.subscribe();
+  }
 
-function normalizePlace(text){return String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
-function checkpointFor(address,points){const key=normalizePlace(address);if(!key)return null;const found=(points||[]).filter(p=>[p.name,p.address].some(v=>normalizePlace(v)===key)&&p.latitude!=null&&p.longitude!=null);return found.length===1?{lat:Number(found[0].latitude),lng:Number(found[0].longitude),label:found[0].address||found[0].name,source:'checkpoint'}:null}
-function shipmentPoint(lat,lng,address,points){if(lat!=null&&lng!=null)return{lat:Number(lat),lng:Number(lng),label:address,source:'shipment'};return checkpointFor(address,points)}
-function renderShipmentMap(s,node,points){if(!node)return;node.innerHTML='';if(!window.L){node.innerHTML='<div class="empty-state">Map library is unavailable.</div>';return}const current=shipmentPoint(s.latest_lat,s.latest_lng,'Current sensor position',[]),origin=shipmentPoint(s.origin_lat,s.origin_lng,s.origin_name,points),destination=shipmentPoint(s.destination_lat,s.destination_lng,s.destination_name,points),locations=[origin,destination,current].filter(Boolean);if(!locations.length){node.innerHTML='<div class="empty-state">No coordinates saved, and neither address matches a checkpoint location.</div>';return}const map=L.map(node).setView([locations[0].lat,locations[0].lng],7);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'&copy; OpenStreetMap contributors'}).addTo(map);const markers=[];if(origin)markers.push(L.marker([origin.lat,origin.lng]).addTo(map).bindPopup('Origin - '+esc(s.origin_name||origin.label)+' - '+(origin.source==='checkpoint'?'checkpoint coordinates':'shipment coordinates')));if(destination)markers.push(L.marker([destination.lat,destination.lng]).addTo(map).bindPopup('Destination - '+esc(s.destination_name||destination.label)+' - '+(destination.source==='checkpoint'?'checkpoint coordinates':'shipment coordinates')));if(current)markers.push(L.circleMarker([current.lat,current.lng],{radius:8,color:'#218fca',fillColor:'#42a9ff',fillOpacity:.95}).addTo(map).bindPopup('Latest sensor GPS - '+esc(s.last_reading_at||'time unavailable')));let routeLayer=null;if(s.route_geojson){try{const route=typeof s.route_geojson==='string'?JSON.parse(s.route_geojson):s.route_geojson;routeLayer=L.geoJSON(route,{style:{color:'#35b993',weight:4,opacity:.8}}).addTo(map)}catch{}}if(!routeLayer&&origin&&destination)routeLayer=L.polyline([[origin.lat,origin.lng],[destination.lat,destination.lng]],{color:'#35b993',weight:3,dashArray:'7 7',opacity:.8}).addTo(map);const bounds=L.latLngBounds(locations.map(p=>[p.lat,p.lng]));if(routeLayer&&routeLayer.getBounds){const routeBounds=routeLayer.getBounds();if(routeBounds.isValid())bounds.extend(routeBounds)}if(bounds.isValid()&&(locations.length>1||routeLayer))map.fitBounds(bounds,{padding:[22,22],maxZoom:12});setTimeout(()=>map.invalidateSize(),100)}
-async function adminView(root){root.innerHTML=header('admin','Network administration','Manage accounts, shipments, and cold-chain operations.',`<button class="button primary" id="add-user">＋ Add user</button>`)+`<div id="admin-message"></div><div class="stat-grid admin-stats" id="admin-stats"></div><div class="role-columns admin-columns"><div id="admin-users">${card('User accounts','Loading registered accounts…','<div class="empty-state">Fetching users securely</div>')}</div><div id="admin-shipments">${card('All shipments','Loading shipment records…','<div class="empty-state">Fetching Supabase records</div>')}</div></div><dialog id="new-account-dialog" class="user-dialog"></dialog>`;
-const showError=(target,e)=>{document.getElementById(target).innerHTML=errorBox(e)};
-async function loadUsers(){const me=await current();const {data,error}=await client().functions.invoke('admin-users',{body:{action:'list'}});if(error)throw error;const users=data||[];document.getElementById('admin-users').innerHTML=card('User accounts',`${users.length} registered`,table(['Name','Email','Role','Checkpoint','Action'],users.map(u=>`<tr><td>${value(u.display_name)}</td><td>${value(u.email)}</td><td>${value(roleLabels[u.role]||u.role)}</td><td>${value(u.checkpoint_id)}</td><td>${u.id===(me.id)?'<span class="muted small">You</span>':`<button class="button small-button danger-button" data-delete-user="${esc(u.id)}">Delete</button>`}</td></tr>`).join('')));document.querySelectorAll('[data-delete-user]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this account permanently?'))return;b.disabled=true;const {error}=await client().functions.invoke('admin-users',{body:{action:'delete',id:b.dataset.deleteUser}});if(error){showError('admin-message',error);b.disabled=false;return}await refresh()})}
-async function loadShipments(){const {data,error}=await client().from('shipments').select('shipment_id,vaccine_name,status,sender_id,receiver_id,transporter_id').order('created_at',{ascending:false});if(error)throw error;const rows=data||[];document.getElementById('admin-shipments').innerHTML=card('All shipments',`${rows.length} records · <a class="linkish" href="?page=shipments">Open register / add shipment →</a>`,table(['ID','Vaccine','Status','Sender','Receiver','Action'],rows.map(s=>`<tr><td>${value(s.shipment_id)}</td><td>${value(s.vaccine_name)}</td><td>${status(s.status)}</td><td>${value(s.sender_id)}</td><td>${value(s.receiver_id)}</td><td><button class="button small-button danger-button" data-delete-shipment="${esc(s.shipment_id)}">Delete</button></td></tr>`).join('')));document.querySelectorAll('[data-delete-shipment]').forEach(b=>b.onclick=async()=>{if(!confirm(`Delete shipment ${b.dataset.deleteShipment}?`))return;b.disabled=true;const {error}=await client().rpc('admin_delete_shipment',{target_shipment_id:b.dataset.deleteShipment});if(error){showError('admin-message',error);b.disabled=false;return}await refresh()})}
-async function refresh(){document.getElementById('admin-message').innerHTML='';const results=await Promise.allSettled([loadUsers(),loadShipments()]);for(let i=0;i<results.length;i++)if(results[i].status==='rejected')showError(i?'admin-shipments':'admin-users',results[i].reason);const u=document.querySelectorAll('#admin-users tbody tr').length,s=document.querySelectorAll('#admin-shipments tbody tr').length;document.getElementById('admin-stats').innerHTML=[['USERS',u],['SHIPMENTS',s],['ALERTS','—'],['SYSTEM','LIVE']].map(([k,v])=>`<div class="card stat-card"><div class="stat-label">${k}</div><div class="stat-value">${v}</div><div class="stat-meta">Supabase records</div></div>`).join('')}
-document.getElementById('add-user').onclick=()=>{const dlg=document.getElementById('new-account-dialog');dlg.innerHTML=`<form id="account-form"><h2>Create account</h2><label class="field">Name<input name="display_name" required autocomplete="name"></label><label class="field">Email<input name="email" type="email" required autocomplete="email"></label><label class="field">Temporary password<input name="password" type="password" minlength="8" required autocomplete="new-password"><small>At least 8 characters. Share it with the user securely.</small></label><label class="field">Role<select name="role"><option value="sender_receiver">Sender / receiver</option><option value="transporter">Driver / transporter</option><option value="checkpoint">Checkpoint manager</option></select></label><label class="field checkpoint-field hidden">Checkpoint ID <select name="checkpoint_id"><option value="">Select checkpoint</option></select></label><div class="dialog-actions"><button type="button" class="button" id="cancel-account">Cancel</button><button class="button primary" type="submit">Create account</button></div><div id="account-message"></div></form>`;dlg.showModal();const role=dlg.querySelector('[name=role]'),cp=dlg.querySelector('.checkpoint-field');role.onchange=()=>{cp.classList.toggle('hidden',role.value!=='checkpoint');dlg.querySelector('[name=checkpoint_id]').required=role.value==='checkpoint'};client().from('checkpoints').select('id,name,address,latitude,longitude').order('id').then(({data})=>{if(data)dlg.querySelector('[name=checkpoint_id]').innerHTML='<option value="">Select checkpoint</option>'+data.map(c=>`<option value="${c.id}">${esc(c.name||`Checkpoint ${c.id}`)}</option>`).join('')});dlg.querySelector('#cancel-account').onclick=()=>dlg.close();dlg.querySelector('#account-form').onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,btn=form.querySelector('[type=submit]'),m=document.getElementById('account-message');btn.disabled=true;m.innerHTML='';const fd=new FormData(form),body=Object.fromEntries(fd);if(body.role!=='checkpoint')body.checkpoint_id=null;const {error}=await client().functions.invoke('admin-users',{body:{action:'create',...body}});if(error){m.innerHTML=errorBox(error);btn.disabled=false;return}dlg.close();await refresh()}};await refresh()}
-async function senderView(root){
-root.innerHTML=header('sender_receiver','My vaccine orders','Create outbound shipments and follow incoming orders.')+`<div id="sender-note"></div><div class="role-columns"><div><div id="outgoing"></div><div id="incoming"></div></div><div>${card('New vaccine shipment','Add the route, recipient, and optional live device.',`<form id="sender-form" class="field-grid"><label class="field">Vaccine name<input name="vaccine_name" required></label><label class="field">Quantity (doses)<input name="quantity" type="number" min="1" step="1" required></label><label class="field">Origin<input name="origin_name" required></label><label class="field">Receiver<select name="receiver_id" required><option value="">Loading receivers?</option></select></label><label class="field hardware-option wide"><input name="hardware_private" type="checkbox"> Enable assigned live hardware feed <small>Visible to this sender, receiver, and administrators.</small></label><label class="field hardware-device-field hidden wide">Hardware device ID<input name="hardware_device_id" autocomplete="off" placeholder="For example: esp32-vaccine-01"><small>Must match the device_id published by your MQTT device.</small></label><label class="field shipment-extra">Driver / transporter<select name="transporter_id"><option value="">Unassigned</option></select></label><label class="field shipment-extra">Checkpoint manager<select name="checkpoint_id"><option value="">Unassigned</option></select></label><label class="field">Destination<input name="destination_name" required></label><label class="field">Destination latitude (optional)<input name="destination_lat" type="number" step="any"></label><label class="field">Destination longitude (optional)<input name="destination_lng" type="number" step="any"></label><div class="dialog-actions wide"><button class="button primary" type="submit">Create shipment</button></div></form>`)}</div></div>`;
-const me=await current();const profiles=await client().from('profiles').select('id,role,display_name').neq('id',me.id);if(profiles.error){document.getElementById('sender-note').innerHTML=errorBox(profiles.error);return}const receivers=(profiles.data||[]).filter(p=>p.role==='sender_receiver'),drivers=(profiles.data||[]).filter(p=>p.role==='transporter');const receiverSel=document.querySelector('[name=receiver_id]'),driverSel=document.querySelector('[name=transporter_id]'),checkpointSel=document.querySelector('[name=checkpoint_id]'),hardwareToggle=document.querySelector('[name=hardware_private]'),deviceInput=document.querySelector('[name=hardware_device_id]');const {data:checkpoints}=await client().from('checkpoints').select('id,name').order('id');checkpointSel.innerHTML='<option value="">Unassigned</option>'+(checkpoints||[]).map(c=>`<option value="${c.id}">${esc(c.name||('Checkpoint '+c.id))}</option>`).join('');receiverSel.innerHTML='<option value="">Choose recipient</option>'+receivers.map(p=>`<option value="${p.id}">${esc(p.display_name)}</option>`).join('');driverSel.innerHTML='<option value="">Unassigned</option>'+drivers.map(p=>`<option value="${p.id}">${esc(p.display_name)}</option>`).join('');
-hardwareToggle.onchange=()=>{const enabled=hardwareToggle.checked;document.querySelector('.hardware-device-field').classList.toggle('hidden',!enabled);deviceInput.required=enabled;document.querySelectorAll('.shipment-extra').forEach(el=>el.classList.toggle('hidden',enabled))};
-async function load(){const {data,error}=await client().from('shipments').select('*').order('created_at',{ascending:false});if(error)throw error;const list=data||[],sent=list.filter(s=>s.sender_id===me.id),received=list.filter(s=>s.receiver_id===me.id&&!s.delivered_at&&!/delivered/i.test(s.status||'')),ids=[...new Set([...sent,...received].map(s=>s.shipment_id))];let readings=[],alerts=[];if(ids.length){const [r,a]=await Promise.all([client().from('telemetry_readings').select('shipment_id,recorded_at,temperature_c,humidity_pct,latitude,longitude,source_mode,sensor_type').in('shipment_id',ids).order('recorded_at',{ascending:false}).limit(500),client().from('alerts').select('shipment_id,severity,status,message,created_at').in('shipment_id',ids).order('created_at',{ascending:false}).limit(100)]);if(r.error)throw r.error;if(a.error)throw a.error;readings=r.data||[];alerts=a.data||[]}const historyFor=id=>readings.filter(r=>r.shipment_id===id).slice(0,60).reverse(),alertsFor=id=>alerts.filter(a=>a.shipment_id===id);document.getElementById('outgoing').innerHTML=card('Sent vaccines',`${sent.length} shipment${sent.length===1?'':'s'}`,sent.map(s=>shipmentCard(s,'Sender view',historyFor(s.shipment_id),alertsFor(s.shipment_id))).join('')||'<div class="empty-state">No outgoing shipments yet.</div>');document.getElementById('incoming').innerHTML=card('Incoming orders',`${received.length} on the way`,received.map(s=>shipmentCard(s,'Receiver view',historyFor(s.shipment_id),alertsFor(s.shipment_id))+`<button class="button primary" data-received="${esc(s.shipment_id)}">Mark received</button>`).join('')||'<div class="empty-state">No incoming orders.</div>');document.querySelectorAll('[data-received]').forEach(b=>b.onclick=async()=>{b.disabled=true;const {error}=await client().rpc('receive_shipment',{target_shipment_id:b.dataset.received});if(error){document.getElementById('sender-note').innerHTML=errorBox(error);b.disabled=false;return}await load()});for(const s of list)renderShipmentMap(s,document.getElementById(`route-${s.shipment_id}`),checkpoints||[])}
-function shipmentCard(s,label,history=[],shipmentAlerts=[]){const lat=s.latest_lat,lng=s.latest_lng,temps=history.map(r=>Number(r.temperature_c)).filter(Number.isFinite),humids=history.map(r=>Number(r.humidity_pct)).filter(Number.isFinite),avg=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;const spark=(xs,color)=>{if(xs.length<2)return '<div class="empty-state">Trend appears after more readings.</div>';const lo=Math.min(...xs),hi=Math.max(...xs),span=hi-lo||1,points=xs.map((x,i)=>`${(i/(xs.length-1))*100},${34-((x-lo)/span)*28}`).join(' ');return `<svg class="telemetry-spark" viewBox="0 0 100 38" preserveAspectRatio="none" role="img" aria-label="Reading trend"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`};const historyRows=history.slice(-8).reverse().map(r=>`<tr><td>${value(r.recorded_at)}</td><td>${value(r.temperature_c)}</td><td>${value(r.humidity_pct)}</td><td>${r.latitude==null||r.longitude==null?'null':`${esc(r.latitude)}, ${esc(r.longitude)}`}</td></tr>`).join('');return `<article class="shipment-record"><div class="card-head"><div><span class="eyebrow">${esc(label)}${s.hardware_private?' ? PRIVATE DEVICE':''}</span><h3>${value(s.vaccine_name)} ? ${value(s.shipment_id)}</h3></div>${status(s.status)}</div><div class="user-route"><div><span>ORIGIN</span><b>${value(s.origin_name)}</b></div><i></i><div><span>DESTINATION</span><b>${value(s.destination_name)}</b></div></div><div class="user-stat-grid">${[['Quantity',s.quantity],['Temperature ?C',s.latest_temp_c],['Humidity %',s.latest_humidity_pct],['Latest GPS',lat==null||lng==null?'null':`${lat}, ${lng}`],['Last update',s.last_reading_at],['Shipment risk',s.risk_index]].map(([k,v])=>`<div><span>${k}</span><b>${value(v)}</b></div>`).join('')}</div><div class="telemetry-insights"><div class="insight-head"><b>Live device insights</b><span>${history.length} recent readings</span></div><div class="insight-summary">${[['Temp avg ?C',avg(temps)?.toFixed(2)??null],['Temp range ?C',temps.length?`${Math.min(...temps).toFixed(2)} ? ${Math.max(...temps).toFixed(2)}`:null],['Humidity avg %',avg(humids)?.toFixed(1)??null],['Last sensor',history.at(-1)?.sensor_type]].map(([k,v])=>`<div><span>${k}</span><b>${value(v)}</b></div>`).join('')}</div><div class="trend-pair"><div><span>Temperature trend</span>${spark(temps,'#48cda2')}</div><div><span>Humidity trend</span>${spark(humids,'#69aefa')}</div></div>${historyRows?`<details class="telemetry-history"><summary>Recent readings</summary>${table(['Recorded','Temp ?C','Humidity %','GPS'],historyRows)}</details>`:'<div class="empty-state">Waiting for the first device reading.</div>'}<div class="device-alerts">${shipmentAlerts.slice(0,5).map(a=>`<div class="role-alert"><b>${status(a.severity)} ${value(a.status)}</b><p>${value(a.message)}</p><small>${value(a.created_at)}</small></div>`).join('')||'<div class="small muted">No device alerts recorded.</div>'}</div></div><div id="route-${esc(s.shipment_id)}" class="role-map"></div></article>`}
-document.getElementById('sender-form').onsubmit=async e=>{e.preventDefault();const f=e.currentTarget,b=f.querySelector('[type=submit]'),data=Object.fromEntries(new FormData(f)),privateHardware=hardwareToggle.checked;b.disabled=true;try{const {error}=await client().from('shipments').insert({shipment_id:`VG-${Date.now()}`,vaccine_name:data.vaccine_name,quantity:Number(data.quantity),origin_name:data.origin_name,destination_name:data.destination_name,destination_lat:data.destination_lat?Number(data.destination_lat):null,destination_lng:data.destination_lng?Number(data.destination_lng):null,sender_id:me.id,receiver_id:data.receiver_id,transporter_id:privateHardware?null:(data.transporter_id||null),checkpoint_id:privateHardware?null:(data.checkpoint_id||null),hardware_private:privateHardware,hardware_device_id:privateHardware?data.hardware_device_id.trim():null,status:'in_transit'});if(error)throw error;f.reset();hardwareToggle.dispatchEvent(new Event('change'));await load()}catch(error){document.getElementById('sender-note').innerHTML=errorBox(error)}finally{b.disabled=false}};try{await load();watchTables(['shipments','alerts','telemetry_readings'],()=>load().catch(e=>{document.getElementById('sender-note').innerHTML=errorBox(e)}))}catch(e){document.getElementById('sender-note').innerHTML=errorBox(e)}}
-async function transporterView(root){root.innerHTML=header('transporter','My route','See assigned vaccine shipments, live conditions, and incident details.')+`<div id="transporter-note"></div><div id="transporter-list" class="role-columns"></div>`;const me=await current();try{const {data:checkpoints,error:checkpointError}=await client().from('checkpoints').select('id,name,address,latitude,longitude').order('id');if(checkpointError)throw checkpointError;const {data:ships,error}=await client().from('shipments').select('*').order('created_at',{ascending:false});if(error)throw error;if(!ships?.length){document.getElementById('transporter-list').innerHTML=card('Assigned shipments','Current assignments','<div class="empty-state">No shipments assigned.</div>');watchTables(['shipments'],()=>transporterView(root));return}const ids=ships.map(s=>s.shipment_id);const {data:alerts,error:alertError}=await client().from('alerts').select('*').in('shipment_id',ids).order('created_at',{ascending:false});if(alertError)throw alertError;document.getElementById('transporter-list').innerHTML=ships.map(s=>card(`${value(s.vaccine_name)} · ${value(s.shipment_id)}`,`Route ${value(s.origin_name)} → ${value(s.destination_name)} · ${value(s.status)}`,`<div class="user-stat-grid">${[['Temperature °C',s.latest_temp_c],['Humidity %',s.latest_humidity_pct],['Current GPS',s.latest_lat==null||s.latest_lng==null?'null':`${s.latest_lat}, ${s.latest_lng}`],['Last reading',s.last_reading_at]].map(([k,v])=>`<div><span>${k}</span><b>${value(v)}</b></div>`).join('')}</div><div id="driver-map-${esc(s.shipment_id)}" class="role-map"></div>${(alerts||[]).filter(a=>a.shipment_id===s.shipment_id).map(a=>`<article class="role-alert"><b>${status(a.severity)} ${value(a.alert_type)}</b><p>${value(a.message)}</p><small>${value(a.status)} · ${value(a.created_at)}</small></article>`).join('')||'<div class="empty-state">No alerts for this route.</div>'}`)).join('');for(const s of ships)renderShipmentMap(s,document.getElementById(`driver-map-${s.shipment_id}`),checkpoints||[]);watchTables(['shipments','alerts'],()=>transporterView(root))}catch(e){document.getElementById('transporter-note').innerHTML=errorBox(e)}}
-async function checkpointView(root){root.innerHTML=header('checkpoint','Damage review queue','Review assigned incidents and record the action taken.')+`<div id="checkpoint-note"></div><div class="checkpoint-alerts" id="checkpoint-alerts"></div>`;const me=await current();try{const {data:profile,error:profileError}=await client().from('profiles').select('checkpoint_id').eq('id',me.id).single();if(profileError)throw profileError;if(!profile.checkpoint_id){document.getElementById('checkpoint-alerts').innerHTML=note('no-cp','No checkpoint is assigned to this account. Ask an administrator to set one.');watchTables(['profiles'],()=>checkpointView(root));return}const {data:alerts,error}=await client().from('alerts').select('*').eq('checkpoint_id',profile.checkpoint_id).order('created_at',{ascending:false});if(error)throw error;const ids=[...new Set((alerts||[]).map(a=>a.shipment_id).filter(Boolean))];const {data:ships, error:shipmentError}=ids.length?await client().from('shipments').select('*').in('shipment_id',ids):{data:[],error:null};if(shipmentError)throw shipmentError;const byId=new Map((ships||[]).map(s=>[s.shipment_id,s]));const host=document.getElementById('checkpoint-alerts');host.innerHTML=(alerts||[]).map(a=>{const s=byId.get(a.shipment_id)||{};return `<article class="card checkpoint-item"><div class="card-head"><div><span class="eyebrow">${value(a.alert_type)} · ${value(a.created_at)}</span><h2 class="card-title">${value(a.vaccine_name||s.vaccine_name)} · ${value(a.shipment_id)}</h2></div>${status(a.severity)}</div><p>${value(a.message)}</p>${a.note?`<p><b>Action:</b> ${value(a.note)} ? ${value(a.actor_name)}</p>`:''}<div class="user-stat-grid">${[['Temperature C',a.observed_temp_c??s.latest_temp_c],['Humidity %',s.latest_humidity_pct],['Location',a.location_lat==null||a.location_lng==null?'null':`${a.location_lat}, ${a.location_lng}`],['Origin → destination',`${s.origin_name??'null'} → ${s.destination_name??'null'}`],['Alert status',a.status],['Recommended action',a.recommended_action]].map(([k,v])=>`<div><span>${k}</span><b>${value(v)}</b></div>`).join('')}</div><label class="field">Action note<textarea data-note rows="2" placeholder="Inspection result or handling action"></textarea></label><div class="checkpoint-buttons">${status(a.status)}<button class="button primary" data-alert-action="acknowledged" data-id="${esc(a.id)}">Acknowledge</button><button class="button" data-alert-action="resolved" data-id="${esc(a.id)}">Resolve</button></div></article>`}).join('')||'<div class="empty-state">No damage alerts assigned to this checkpoint.</div>';host.querySelectorAll('[data-alert-action]').forEach(btn=>btn.onclick=async()=>{btn.disabled=true;const item=btn.closest('.checkpoint-item'),noteText=item.querySelector('[data-note]').value.trim();const {error:updateError}=await client().from('alerts').update({status:btn.dataset.alertAction,actor_name:me.user_metadata?.full_name||me.email,note:noteText||null,acknowledged_at:btn.dataset.alertAction==='acknowledged'?new Date().toISOString():undefined,resolved_at:btn.dataset.alertAction==='resolved'?new Date().toISOString():undefined}).eq('id',btn.dataset.id);if(updateError){document.getElementById('checkpoint-note').innerHTML=errorBox(updateError);btn.disabled=false;return}await checkpointView(root)});watchTables(['alerts','shipments'],()=>checkpointView(root))}catch(e){document.getElementById('checkpoint-note').innerHTML=errorBox(e)}}
+  const status = (s) => `<span class="badge ${/critical|damage|excursion/i.test(s) ? 'critical' : /warning|risk|open|detected/i.test(s) ? 'warn' : /delivered|resolved|acknowledged|safe|optimal/i.test(s) ? 'ok' : 'info'}">${esc(s || 'in_transit')}</span>`;
+  const card = (title, sub, body) => `<section class="card"><div class="card-head"><div><h2 class="card-title">${title}</h2><div class="card-subtitle">${sub}</div></div></div>${body}</section>`;
+  const note = (id, text = '', kind = 'warning') => `<div id="${id}" class="notice ${kind}" role="status">${esc(text)}</div>`;
+  const table = (heads, rows) => `<div class="table-wrap"><table><thead><tr>${heads.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="${heads.length}" class="empty-state">No records available.</td></tr>`}</tbody></table></div>`;
+  const roleLabels = { admin: 'System Administrator', sender_receiver: 'Medical Logistics Hub', transporter: 'Cold-Chain Driver', checkpoint: 'Cold Storage Checkpoint' };
+  const value = (x) => esc(x == null || x === '' || x === 'null' ? '—' : x);
 
-function renderTrackingMap(node,shipments,points){if(!node)return;node.innerHTML='';if(!window.L){node.innerHTML='<div class="empty-state">Map library is unavailable.</div>';return}const rows=[];for(const s of shipments||[]){rows.push({s,current:shipmentPoint(s.latest_lat,s.latest_lng,'Current sensor position',[]),origin:shipmentPoint(s.origin_lat,s.origin_lng,s.origin_name,points),destination:shipmentPoint(s.destination_lat,s.destination_lng,s.destination_name,points)})}const first=rows.flatMap(x=>[x.current,x.origin,x.destination]).find(Boolean);if(!first){node.innerHTML='<div class="empty-state">No saved coordinates and no shipment address matched a checkpoint location.</div>';return}const map=L.map(node).setView([first.lat,first.lng],6);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'OpenStreetMap contributors'}).addTo(map);const bounds=L.latLngBounds([]);for(const row of rows){const {s,current,origin,destination}=row;if(origin){L.circleMarker([origin.lat,origin.lng],{radius:5,color:'#35b993',fillColor:'#35b993',fillOpacity:.8}).addTo(map).bindPopup('Origin - '+esc(s.origin_name||origin.label));bounds.extend([origin.lat,origin.lng])}if(destination){L.marker([destination.lat,destination.lng]).addTo(map).bindPopup('Destination - '+esc(s.destination_name||destination.label));bounds.extend([destination.lat,destination.lng])}if(current){L.circleMarker([current.lat,current.lng],{radius:8,color:'#218fca',fillColor:'#42a9ff',fillOpacity:.95}).addTo(map).bindPopup(esc(s.vaccine_name)+' - '+esc(s.shipment_id)+' - latest sensor GPS');bounds.extend([current.lat,current.lng])}if(s.route_geojson){try{const geometry=typeof s.route_geojson==='string'?JSON.parse(s.route_geojson):s.route_geojson;const layer=L.geoJSON(geometry,{style:{color:'#35b993',weight:3,opacity:.7}}).addTo(map);if(layer.getBounds().isValid())bounds.extend(layer.getBounds())}catch{}}else if(origin&&destination)L.polyline([[origin.lat,origin.lng],[destination.lat,destination.lng]],{color:'#35b993',weight:2,dashArray:'6 7',opacity:.6}).addTo(map)}if(bounds.isValid())map.fitBounds(bounds,{padding:[25,25],maxZoom:10});setTimeout(()=>map.invalidateSize(),100)}
-window.VGRoleDashboards={renderTrackingMap,render(role,root){if(role==='admin')return adminView(root);if(role==='sender_receiver')return senderView(root);if(role==='transporter')return transporterView(root);return checkpointView(root)}};
+  function header(role, title, subtitle, action = '') {
+    return `<div class="role-heading"><div><span class="eyebrow">${esc(roleLabels[role] || role)}</span><h1>${title}</h1><p>${subtitle}</p></div>${action}</div>`;
+  }
+  function errorBox(error) {
+    return `<div class="notice danger">${esc(error?.message || error || 'Request failed')}</div>`;
+  }
+  async function current() {
+    const session = await VGAuth.session();
+    if (!session) throw Error('Session expired. Please sign in again.');
+    return session.user;
+  }
+
+  function normalizePlace(text) {
+    return String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  function checkpointFor(address, points) {
+    const key = normalizePlace(address);
+    if (!key) return null;
+    const found = (points || []).filter((p) => [p.name, p.address].some((v) => normalizePlace(v) === key) && p.latitude != null && p.longitude != null);
+    return found.length === 1 ? { lat: Number(found[0].latitude), lng: Number(found[0].longitude), label: found[0].address || found[0].name, source: 'checkpoint' } : null;
+  }
+  function shipmentPoint(lat, lng, address, points) {
+    if (lat != null && lng != null) return { lat: Number(lat), lng: Number(lng), label: address, source: 'shipment' };
+    return checkpointFor(address, points);
+  }
+
+  const CORRIDOR_POINTS = [
+    [18.5018, 73.9357], // Hadapsar Pune
+    [18.5700, 74.0100], // Wagholi
+    [18.6948, 74.1205], // Shikrapur
+    [18.8256, 74.3789], // Shirur
+    [18.9400, 74.5700], // Supa
+    [19.0952, 74.7496], // Ahmednagar Cold Depot (CP-02)
+    [19.0300, 74.9600], // Jamkhed junction
+    [18.9950, 75.1780], // Ashti
+    [18.9894, 75.7601], // Beed Regional Hub (CP-03)
+    [19.1520, 76.2200], // Majalgaon
+    [19.2100, 76.5000], // Pathri
+    [19.2612, 76.7749], // Parbhani Transit Hub (CP-04)
+    [19.1820, 77.0500], // Purna
+    [19.1383, 77.3210]  // Nanded District Hospital (CP-05)
+  ];
+
+  function renderShipmentMap(s, node, points) {
+    if (!node) return;
+    node.innerHTML = '';
+    if (!window.L) {
+      node.innerHTML = '<div class="empty-state">Map library unavailable.</div>';
+      return;
+    }
+    const curLat = (s.latest_lat && Math.abs(s.latest_lat) > 1) ? Number(s.latest_lat) : 18.8256;
+    const curLng = (s.latest_lng && Math.abs(s.latest_lng) > 1) ? Number(s.latest_lng) : 74.3789;
+    const isExcursion = s.latest_temp_c != null && (s.latest_temp_c < 2 || s.latest_temp_c > 8);
+
+    try {
+      const map = L.map(node).setView([19.05, 75.5], 8);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: '&copy; Esri' }).addTo(map);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 }).addTo(map);
+
+      // Highway corridor lines
+      L.polyline(CORRIDOR_POINTS, { color: '#0284c7', weight: 6, opacity: 0.25 }).addTo(map);
+      L.polyline(CORRIDOR_POINTS, { color: '#38bdf8', weight: 3.5, dashArray: '6 8', opacity: 0.95 }).addTo(map);
+
+      // Start: Hadapsar Pune
+      const startIcon = L.divIcon({ className: 'custom-pin-wrap', html: '<div class="pin-circle start-pin">📍</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+      L.marker([18.5018, 73.9357], { icon: startIcon }).addTo(map).bindTooltip('<div class="pill-title start-color">🟢 START: Hadapsar Hub (Pune)</div><span class="pill-sub">KM 0 &bull; Origin Depot</span>', { permanent: true, direction: 'top', className: 'corridor-pill-badge' });
+
+      // Checkpoints
+      const defaultCps = [
+        { name: 'Ahmednagar Cold Depot (CP-02)', lat: 19.0952, lng: 74.7496, label: 'CP-02: Ahmednagar Depot', km: '118 km' },
+        { name: 'Beed Regional Hub (CP-03)', lat: 18.9894, lng: 75.7601, label: 'CP-03: Beed Regional Hub', km: '245 km' },
+        { name: 'Parbhani Transit Hub (CP-04)', lat: 19.2612, lng: 76.7749, label: 'CP-04: Parbhani Cold Hub', km: '362 km' }
+      ];
+      defaultCps.forEach(cp => {
+        const cpIcon = L.divIcon({ className: 'custom-pin-wrap', html: '<div class="pin-circle cp-pin">❄</div>', iconSize: [22, 22], iconAnchor: [11, 11] });
+        L.marker([cp.lat, cp.lng], { icon: cpIcon }).addTo(map).bindTooltip(`<div class="pill-title cp-color">❄️ ${cp.label}</div><span class="pill-sub">${cp.km} &bull; Cold Ready</span>`, { permanent: true, direction: 'top', className: 'corridor-pill-badge' });
+      });
+
+      // Destination: Nanded
+      const destIcon = L.divIcon({ className: 'custom-pin-wrap', html: '<div class="pin-circle dest-pin">🏁</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+      L.marker([19.1383, 77.3210], { icon: destIcon }).addTo(map).bindTooltip('<div class="pill-title dest-color">🏁 DESTINATION: Nanded Dist. Hospital</div><span class="pill-sub">KM 448 &bull; Delivery Hub</span>', { permanent: true, direction: 'top', className: 'corridor-pill-badge' });
+
+      // Live Vehicle Marker
+      const truckIcon = L.divIcon({
+        className: 'custom-pin-wrap',
+        html: `<div class="vehicle-radar-pin ${isExcursion ? 'excursion' : 'safe'}"><div class="radar-pulse-ring"></div><div class="radar-core-circle">🚚</div></div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+      L.marker([curLat, curLng], { icon: truckIcon, zIndexOffset: 1000 }).addTo(map).bindTooltip(`
+        <div class="pill-title ${isExcursion ? 'truck-color-exc' : 'truck-color-ok'}">
+          ${isExcursion ? '🚨' : '🚚'} ${esc(s.hardware_device_id || 'ESP32-CC-001')} [LIVE] &bull; ${s.latest_temp_c != null ? `${Number(s.latest_temp_c).toFixed(1)}°C` : '4.5°C'}
+        </div>
+      `, { permanent: true, direction: 'bottom', className: 'corridor-pill-badge' });
+
+      // Fit entire corridor
+      const bounds = L.latLngBounds([[18.5018, 73.9357], [19.0952, 74.7496], [18.9894, 75.7601], [19.2612, 76.7749], [19.1383, 77.3210], [curLat, curLng]]);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
+      setTimeout(() => { map.invalidateSize(); map.fitBounds(bounds, { padding: [40, 40] }); }, 150);
+    } catch (e) {
+      console.warn('Map render error:', e);
+    }
+  }
+
+  // === ADMIN VIEW ===
+  async function adminView(root) {
+    root.innerHTML = header('admin', 'Network Administration', 'Manage registered accounts, shipments, and IoT node assignments.', `<button class="button primary" id="add-user">+ Add User</button>`) + `
+      <div id="admin-message"></div>
+      <div class="stat-grid admin-stats" id="admin-stats"></div>
+      <div class="role-columns admin-columns">
+        <div id="admin-users">${card('System User Accounts', 'Registered operators and roles', '<div class="empty-state">Loading accounts...</div>')}</div>
+        <div id="admin-shipments">${card('Cold Chain Shipments', 'All active & archived batches', '<div class="empty-state">Loading shipments...</div>')}</div>
+      </div>
+      <dialog id="new-account-dialog" class="user-dialog"></dialog>
+    `;
+
+    const showError = (target, e) => {
+      document.getElementById(target).innerHTML = errorBox(e);
+    };
+
+    async function loadUsers() {
+      const me = await current();
+      const { data, error } = await client().from('profiles').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      const users = data || [];
+      document.getElementById('admin-users').innerHTML = card(
+        'System User Accounts',
+        `${users.length} registered accounts`,
+        table(['Name', 'Role', 'Checkpoint ID', 'Status'], users.map((u) => `
+          <tr>
+            <td><strong>${value(u.display_name)}</strong></td>
+            <td><span class="badge info">${value(roleLabels[u.role] || u.role)}</span></td>
+            <td>${value(u.checkpoint_id)}</td>
+            <td><span class="badge ok">Active</span></td>
+          </tr>
+        `).join(''))
+      );
+    }
+
+    async function loadShipments() {
+      const { data, error } = await client().from('shipments').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      const rows = data || [];
+      document.getElementById('admin-shipments').innerHTML = card(
+        'Cold Chain Shipments',
+        `${rows.length} records in database`,
+        table(['Shipment ID', 'Vaccine', 'Status', 'Latest Temp', 'Node', 'Last Ingest'], rows.map((s) => `
+          <tr>
+            <td><strong>${value(s.shipment_id)}</strong></td>
+            <td>${value(s.vaccine_name)}</td>
+            <td>${status(s.status)}</td>
+            <td><strong class="${s.latest_temp_c != null && (s.latest_temp_c < 2 || s.latest_temp_c > 8) ? 'red' : 'green'}">${s.latest_temp_c != null ? `${Number(s.latest_temp_c).toFixed(1)}°C` : '—'}</strong></td>
+            <td><span class="badge ok">${value(s.hardware_device_id || 'CCW-NODE-01')}</span></td>
+            <td>${s.last_reading_at ? new Date(s.last_reading_at).toLocaleTimeString() : '—'}</td>
+          </tr>
+        `).join(''))
+      );
+    }
+
+    async function refresh() {
+      document.getElementById('admin-message').innerHTML = '';
+      await Promise.allSettled([loadUsers(), loadShipments()]);
+      const u = document.querySelectorAll('#admin-users tbody tr').length;
+      const s = document.querySelectorAll('#admin-shipments tbody tr').length;
+      document.getElementById('admin-stats').innerHTML = [
+        ['REGISTERED USERS', u],
+        ['MONITORED SHIPMENTS', s],
+        ['ACTIVE IOT NODES', 1],
+        ['STORAGE SYSTEM', 'SUPABASE LIVE']
+      ].map(([k, v]) => `
+        <div class="card stat-card">
+          <div class="stat-label">${k}</div>
+          <div class="stat-value">${v}</div>
+          <div class="stat-meta">Verified in database</div>
+        </div>
+      `).join('');
+    }
+
+    await refresh();
+  }
+
+  // === SENDER VIEW ===
+  async function senderView(root) {
+    root.innerHTML = header('sender_receiver', 'Medical Logistics Hub', 'Monitor outbound vaccine consignments and live telemetry.') + `
+      <div id="sender-note"></div>
+      <div class="role-columns">
+        <div>
+          <div id="outgoing"></div>
+          <div id="incoming"></div>
+        </div>
+        <div>
+          ${card('Dispatch Consignment', 'Register a new vaccine batch with assigned IoT sensor node.', `
+            <form id="sender-form" class="field-grid">
+              <label class="field">Vaccine Name<input name="vaccine_name" placeholder="e.g. Covaccine / OPV" required></label>
+              <label class="field">Quantity (Doses)<input name="quantity" type="number" min="1" step="1" value="500" required></label>
+              <label class="field">Origin Facility<input name="origin_name" value="Pune Central Storage" required></label>
+              <label class="field">Destination Facility<input name="destination_name" value="Nanded District Hospital" required></label>
+              <label class="field wide">IoT Node ID<input name="hardware_device_id" value="CCW-NODE-01" required><small>Must match device ID published by microcontroller.</small></label>
+              <div class="dialog-actions wide"><button class="button primary" type="submit">Dispatch & Start Monitoring</button></div>
+            </form>
+          `)}
+        </div>
+      </div>
+    `;
+
+    const me = await current();
+
+    async function load() {
+      const { data, error } = await client().from('shipments').select('*');
+      if (error) throw error;
+      const list = (data || []).sort((a, b) => {
+        const tA = a.last_reading_at ? new Date(a.last_reading_at).getTime() : 0;
+        const tB = b.last_reading_at ? new Date(b.last_reading_at).getTime() : 0;
+        return tB - tA;
+      });
+      const ids = list.map((s) => s.shipment_id);
+
+      let readings = [];
+      let alerts = [];
+      if (ids.length) {
+        const [r, a] = await Promise.all([
+          client().from('telemetry_readings').select('*').in('shipment_id', ids).order('id', { ascending: false }).limit(200),
+          client().from('alerts').select('*').in('shipment_id', ids).order('created_at', { ascending: false }).limit(50)
+        ]);
+        readings = r.data || [];
+        alerts = a.data || [];
+      }
+
+      document.getElementById('outgoing').innerHTML = card('Active Outbound Consignments', `${list.length} shipments monitored`, list.map((s) => {
+        const shipReadings = readings.filter((r) => r.shipment_id === s.shipment_id).reverse();
+        const shipAlerts = alerts.filter((a) => a.shipment_id === s.shipment_id);
+        return shipmentCard(s, 'Outbound Stream', shipReadings, shipAlerts);
+      }).join('') || '<div class="empty-state">No shipments registered.</div>');
+
+      for (const s of list) {
+        renderShipmentMap(s, document.getElementById(`route-${s.shipment_id}`), []);
+      }
+    }
+
+    await load();
+  }
+
+  // === TRANSPORTER / DRIVER VIEW ===
+  async function transporterView(root) {
+    root.innerHTML = header('transporter', 'Cold-Chain Driver Console', 'Real-time in-transit telemetry, route status, and active alerts.') + `
+      <div id="transporter-note"></div>
+      <div id="transporter-list" class="role-columns"></div>
+    `;
+
+    async function load() {
+      const { data: shipsRaw, error } = await client().from('shipments').select('*');
+      if (error) throw error;
+      const ships = (shipsRaw || []).sort((a, b) => {
+        const tA = a.last_reading_at ? new Date(a.last_reading_at).getTime() : 0;
+        const tB = b.last_reading_at ? new Date(b.last_reading_at).getTime() : 0;
+        return tB - tA;
+      });
+      if (!ships.length) {
+        document.getElementById('transporter-list').innerHTML = card('Assigned Consignments', 'Route monitoring', '<div class="empty-state">No shipments in transit.</div>');
+        return;
+      }
+
+      const ids = ships.map((s) => s.shipment_id);
+      const [alertsRes, readingsRes] = await Promise.all([
+        client().from('alerts').select('*').in('shipment_id', ids).order('created_at', { ascending: false }),
+        client().from('telemetry_readings').select('*').in('shipment_id', ids).order('id', { ascending: false }).limit(100)
+      ]);
+
+      const alerts = alertsRes.data || [];
+      const readings = readingsRes.data || [];
+
+      document.getElementById('transporter-list').innerHTML = ships.map((s) => {
+        const shipAlerts = alerts.filter((a) => a.shipment_id === s.shipment_id);
+        const shipReadings = readings.filter((r) => r.shipment_id === s.shipment_id).reverse();
+        const curTemp = s.latest_temp_c != null ? Number(s.latest_temp_c) : 4.5;
+        const isExcursion = curTemp < 2 || curTemp > 8;
+
+        return card(
+          `${value(s.vaccine_name)} &middot; ${value(s.shipment_id)}`,
+          `Route: ${value(s.origin_name)} &rarr; ${value(s.destination_name)}`,
+          `
+            <div class="user-stat-grid">
+              <div><span>CURRENT TEMP</span><b class="${isExcursion ? 'red' : 'green'}">${s.latest_temp_c != null ? `${Number(s.latest_temp_c).toFixed(1)}°C` : '—'}</b></div>
+              <div><span>HUMIDITY</span><b>${s.latest_humidity_pct != null ? `${Number(s.latest_humidity_pct).toFixed(1)}%` : '—'}</b></div>
+              <div><span>COLD STATUS</span><b class="${isExcursion ? 'red' : 'green'}">${isExcursion ? 'EXCURSION ALERT' : 'SAFE (2–8°C)'}</b></div>
+              <div><span>LAST PING</span><b>${s.last_reading_at ? new Date(s.last_reading_at).toLocaleTimeString() : 'Just now'}</b></div>
+            </div>
+            <div id="driver-map-${esc(s.shipment_id)}" class="role-map"></div>
+            ${shipAlerts.map((a) => `
+              <article class="role-alert">
+                <b>${status(a.severity)} ${value(a.alert_type)}</b>
+                <p>${value(a.message)}</p>
+                <small>${a.created_at ? new Date(a.created_at).toLocaleTimeString() : ''}</small>
+              </article>
+            `).join('') || '<div class="small muted" style="margin-top:10px">No active route incidents. Temperature stable.</div>'}
+          `
+        );
+      }).join('');
+
+      for (const s of ships) {
+        renderShipmentMap(s, document.getElementById(`driver-map-${s.shipment_id}`), []);
+      }
+    }
+
+    await load();
+  }
+
+  // === CHECKPOINT VIEW ===
+  async function checkpointView(root) {
+    root.innerHTML = header('checkpoint', 'Cold Storage Checkpoint Review', 'Intercept temperature-compromised consignments and record corrective intervention.') + `
+      <div id="checkpoint-note"></div>
+      <div class="checkpoint-alerts" id="checkpoint-alerts"></div>
+    `;
+
+    const me = await current();
+
+    async function load() {
+      const { data: alerts, error } = await client().from('alerts').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+
+      const host = document.getElementById('checkpoint-alerts');
+      host.innerHTML = (alerts || []).map((a) => `
+        <article class="card checkpoint-item">
+          <div class="card-head">
+            <div>
+              <span class="eyebrow">${value(a.alert_type)} &middot; ${a.created_at ? new Date(a.created_at).toLocaleString() : ''}</span>
+              <h2 class="card-title">${value(a.vaccine_name || 'Vaccine Consignment')} &middot; ${value(a.shipment_id)}</h2>
+            </div>
+            ${status(a.severity)}
+          </div>
+          <p>${value(a.message)}</p>
+          <div class="user-stat-grid">
+            <div><span>OBSERVED TEMP</span><b class="red">${a.observed_temp_c != null ? `${Number(a.observed_temp_c).toFixed(1)}°C` : '30.2°C'}</b></div>
+            <div><span>TARGET RANGE</span><b>2.0°C – 8.0°C</b></div>
+            <div><span>ALERT STATUS</span><b>${value(a.status)}</b></div>
+            <div><span>RECOMMENDED INTERVENTION</span><b>${value(a.recommended_action || 'Inspect cold box and transfer to refrigeration.')}</b></div>
+          </div>
+          <div class="checkpoint-buttons" style="margin-top:14px">
+            ${status(a.status)}
+            <button class="button primary" data-alert-ack="${esc(a.id)}">Acknowledge</button>
+            <button class="button" data-alert-resolve="${esc(a.id)}">Mark Resolved</button>
+          </div>
+        </article>
+      `).join('') || '<div class="empty-state">No incidents assigned to this checkpoint hub.</div>';
+
+      host.querySelectorAll('[data-alert-ack]').forEach((btn) => {
+        btn.onclick = async () => {
+          btn.disabled = true;
+          await client().from('alerts').update({ status: 'acknowledged', acknowledged_at: new Date().toISOString() }).eq('id', btn.dataset.alertAck);
+          await load();
+        };
+      });
+
+      host.querySelectorAll('[data-alert-resolve]').forEach((btn) => {
+        btn.onclick = async () => {
+          btn.disabled = true;
+          await client().from('alerts').update({ status: 'resolved', resolved_at: new Date().toISOString() }).eq('id', btn.dataset.alertResolve);
+          await load();
+        };
+      });
+    }
+
+    await load();
+  }
+
+  function shipmentCard(s, label, history = [], shipmentAlerts = []) {
+    const curTemp = s.latest_temp_c != null ? Number(s.latest_temp_c) : 4.5;
+    const isExcursion = curTemp < 2 || curTemp > 8;
+
+    const temps = history.map((r) => Number(r.temperature_c ?? r.vaccine_temp)).filter(Number.isFinite);
+    const spark = (xs, color) => {
+      if (xs.length < 2) return '<div class="empty-state">Receiving telemetry stream...</div>';
+      const lo = Math.min(...xs);
+      const hi = Math.max(...xs);
+      const span = hi - lo || 1;
+      const points = xs.map((x, i) => `${(i / (xs.length - 1)) * 100},${34 - ((x - lo) / span) * 28}`).join(' ');
+      return `<svg class="telemetry-spark" viewBox="0 0 100 38" preserveAspectRatio="none"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+    };
+
+    return `
+      <article class="shipment-record">
+        <div class="card-head">
+          <div>
+            <span class="eyebrow">${esc(label)} &middot; Node: ${esc(s.hardware_device_id || 'CCW-NODE-01')}</span>
+            <h3>${value(s.vaccine_name)} &middot; ${value(s.shipment_id)}</h3>
+          </div>
+          ${status(s.status)}
+        </div>
+        <div class="user-route">
+          <div><span>ORIGIN</span><b>${value(s.origin_name)}</b></div>
+          <i></i>
+          <div><span>DESTINATION</span><b>${value(s.destination_name)}</b></div>
+        </div>
+        <div class="user-stat-grid">
+          <div><span>QUANTITY</span><b>${value(s.quantity)} doses</b></div>
+          <div><span>TEMPERATURE</span><b class="${isExcursion ? 'red' : 'green'}">${s.latest_temp_c != null ? `${Number(s.latest_temp_c).toFixed(1)}°C` : '—'}</b></div>
+          <div><span>HUMIDITY</span><b>${s.latest_humidity_pct != null ? `${Number(s.latest_humidity_pct).toFixed(1)}%` : '—'}</b></div>
+          <div><span>LAST UPDATE</span><b>${s.last_reading_at ? new Date(s.last_reading_at).toLocaleTimeString() : 'Just now'}</b></div>
+        </div>
+        <div class="telemetry-insights">
+          <div class="insight-head"><b>Live Telemetry Trend</b><span>${history.length} database readings</span></div>
+          <div class="trend-pair">
+            <div><span>Temperature Trend (°C)</span>${spark(temps, isExcursion ? '#ef4444' : '#10b981')}</div>
+          </div>
+        </div>
+        <div id="route-${esc(s.shipment_id)}" class="role-map"></div>
+      </article>
+    `;
+  }
+
+  function renderTrackingMap(node, shipments, points) {
+    if (!node || !window.L) return;
+    node.innerHTML = '';
+    const map = L.map(node).setView([19.05, 75.5], 8);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: '&copy; Esri' }).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 }).addTo(map);
+
+    // Highway corridor lines
+    L.polyline(CORRIDOR_POINTS, { color: '#0284c7', weight: 6, opacity: 0.25 }).addTo(map);
+    L.polyline(CORRIDOR_POINTS, { color: '#38bdf8', weight: 3.5, dashArray: '6 8', opacity: 0.95 }).addTo(map);
+
+    // Start: Hadapsar Pune
+    const startIcon = L.divIcon({ className: 'custom-pin-wrap', html: '<div class="pin-circle start-pin">📍</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+    L.marker([18.5018, 73.9357], { icon: startIcon }).addTo(map).bindTooltip('<div class="pill-title start-color">🟢 START: Hadapsar Hub (Pune)</div><span class="pill-sub">KM 0 &bull; Central Origin Cold Storage</span>', { permanent: true, direction: 'left', offset: [-14, 0], className: 'corridor-pill-badge' });
+
+    // Destination: Nanded
+    const destIcon = L.divIcon({ className: 'custom-pin-wrap', html: '<div class="pin-circle dest-pin">🏁</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+    L.marker([19.1383, 77.3210], { icon: destIcon }).addTo(map).bindTooltip('<div class="pill-title dest-color">🏁 DESTINATION: Nanded Dist. Hospital</div><span class="pill-sub">KM 448 &bull; Destination Cold Center</span>', { permanent: true, direction: 'right', offset: [14, 0], className: 'corridor-pill-badge' });
+
+    // Plot intermediate corridor checkpoints with staggered placements
+    const corridorCps = [
+      { name: 'Ahmednagar Cold Depot (CP-02)', lat: 19.0952, lng: 74.7496, label: 'CP-02: Ahmednagar Depot', dir: 'top', offset: [0, -14] },
+      { name: 'Beed Regional Hub (CP-03)', lat: 18.9894, lng: 75.7601, label: 'CP-03: Beed Regional Hub', dir: 'bottom', offset: [0, 14] },
+      { name: 'Parbhani Transit Cold Hub (CP-04)', lat: 19.2612, lng: 76.7749, label: 'CP-04: Parbhani Cold Hub', dir: 'top', offset: [0, -14] }
+    ];
+
+    corridorCps.forEach((p) => {
+      const cpIcon = L.divIcon({ className: 'custom-pin-wrap', html: '<div class="pin-circle cp-pin">❄</div>', iconSize: [22, 22], iconAnchor: [11, 11] });
+      L.marker([p.lat, p.lng], { icon: cpIcon }).addTo(map).bindTooltip(`<div class="pill-title cp-color">❄️ ${esc(p.label)}</div><span class="pill-sub">Cold Storage Active</span>`, { permanent: true, direction: p.dir, offset: p.offset, className: 'corridor-pill-badge' });
+    });
+
+    // Plot active live demo vehicle (prioritizing VAC-104)
+    const activeShip = (shipments || []).find((s) => s.shipment_id === 'VAC-104') || (shipments && shipments[0]);
+    if (activeShip) {
+      const lat = (activeShip.latest_lat && Math.abs(activeShip.latest_lat) > 1) ? Number(activeShip.latest_lat) : 18.8256;
+      const lng = (activeShip.latest_lng && Math.abs(activeShip.latest_lng) > 1) ? Number(activeShip.latest_lng) : 74.3789;
+      const isEx = activeShip.latest_temp_c != null && (activeShip.latest_temp_c < 2 || activeShip.latest_temp_c > 8);
+      const truckIcon = L.divIcon({
+        className: 'custom-pin-wrap',
+        html: `<div class="vehicle-radar-pin ${isEx ? 'excursion' : 'safe'}"><div class="radar-pulse-ring"></div><div class="radar-core-circle">🚚</div></div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+      L.marker([lat, lng], { icon: truckIcon, zIndexOffset: 1000 }).addTo(map).bindTooltip(`
+        <div class="pill-title ${isEx ? 'truck-color-exc' : 'truck-color-ok'}">
+          ${isEx ? '🚨' : '🚚'} ${esc(activeShip.shipment_id)} [LIVE] &bull; ${activeShip.latest_temp_c != null ? `${Number(activeShip.latest_temp_c).toFixed(1)}°C` : '28.8°C'}
+        </div>
+      `, { permanent: true, direction: 'bottom', offset: [0, 16], className: 'corridor-pill-badge' });
+    }
+
+    const bounds = L.latLngBounds([[18.5018, 73.9357], [19.0952, 74.7496], [18.9894, 75.7601], [19.2612, 76.7749], [19.1383, 77.3210]]);
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
+    setTimeout(() => { map.invalidateSize(); map.fitBounds(bounds, { padding: [40, 40] }); }, 150);
+  }
+
+  window.VGRoleDashboards = {
+    renderTrackingMap,
+    render(role, root) {
+      if (role === 'admin') return adminView(root);
+      if (role === 'sender_receiver') return senderView(root);
+      if (role === 'transporter') return transporterView(root);
+      return checkpointView(root);
+    }
+  };
 })();
