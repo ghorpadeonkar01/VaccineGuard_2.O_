@@ -21,3 +21,6 @@ coverage/
 # Python cache
 _pycache_/
 *.py[cod]
+
+.DS_Store
+.vscode/
