@@ -67,8 +67,15 @@ def api_request(url: str, secret: str, method: str = "GET", payload=None, prefer
         headers["Prefer"] = prefer
 
     req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    ssl_context = None
     try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        import certifi
+        import ssl
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    try:
+        with urllib.request.urlopen(req, timeout=25, context=ssl_context) as resp:
             content = resp.read()
             return json.loads(content) if content else None
     except urllib.error.HTTPError as err:

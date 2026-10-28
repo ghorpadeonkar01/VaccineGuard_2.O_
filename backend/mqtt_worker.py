@@ -255,7 +255,6 @@ def process_reading(data: dict) -> None:
     supabase.table("telemetry_readings").insert(reading).execute()
 
     shipment = {
-        "shipment_id": shipment_id,
         "latest_temp_c": temp_c,
         "latest_humidity_pct": humidity,
         "latest_lat": data.get("lat"),
@@ -265,9 +264,7 @@ def process_reading(data: dict) -> None:
         "last_reading_at": data["ts"],
         "hardware_device_id": data["device_id"],
     }
-    supabase.table("shipments").upsert(
-        shipment, on_conflict="shipment_id"
-    ).execute()
+    supabase.table("shipments").update(shipment).eq("shipment_id", shipment_id).execute()
 
     if status in ("warning", "critical") and status != previous_status:
         position_lat, position_lng = data.get("lat"), data.get("lng")
