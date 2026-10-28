@@ -29,6 +29,22 @@ Conventional supply chains rely on passive, retrospective USB dataloggers. When 
 
 ---
 
+## 📸 Platform Interface & Screenshots
+
+### 🖥️ Operations Center & Live Telemetry Dashboard
+*Real-time thermal monitoring, dual core/ambient telemetry meters, viability curves, and automated alert queues.*
+![VaccineGuard Operations Center](docs/screenshots/operations_dashboard.png)
+
+### 🗺️ Standardized Logistics Corridor (Pune ➔ Nanded Express Route)
+*448 km mission route with active waypoint nodes, certified cold-chain buffer depots, and dynamic emergency intercept vectors.*
+![Pune to Nanded Corridor Tracking](docs/screenshots/logistics_corridor_map.png)
+
+### ⚡ Operations Sign-In with 1-Click Evaluation Access
+*Role-based workspaces designed for high-stress operations with instant role switching for judges and evaluators.*
+![VaccineGuard Sign In & Evaluator Access](docs/screenshots/login_operations.png)
+
+---
+
 ## 🏛️ System Architecture
 
 ```
