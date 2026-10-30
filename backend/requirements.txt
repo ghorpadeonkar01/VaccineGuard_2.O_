@@ -1,0 +1,4 @@
+paho-mqtt>=2.1.0
+python-dotenv>=1.0.0
+supabase>=2.30.0
+certifi>=2024.0.0
